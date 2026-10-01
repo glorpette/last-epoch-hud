@@ -5,6 +5,7 @@ using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppLE.UI;
 using Il2CppLE.Telemetry;
+using Il2CppLE.Telemetry.Logger;
 using Il2CppItemFiltering;
 using Il2CppLidgren.Network;
 using Il2CppSystem.Net;

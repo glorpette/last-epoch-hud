@@ -2,6 +2,7 @@ using Il2Cpp;
 using Il2CppItemFiltering;
 using Mod.Game;
 using System;
+using System.Reflection;
 using UnityEngine;
 
 namespace Mod.Cheats.ESP
@@ -136,20 +137,23 @@ namespace Mod.Cheats.ESP
                 return itemDataRarity;
             }
 
-            // New LE versions populate the V2 rarity visuals; keep legacy as a fallback.
+            // New LE versions populate the V2 rarity visuals; keep legacy as a reflection fallback
+            // because the legacy member is no longer present in current generated assemblies.
+            object? legacyVisuals = GetLegacyRarityVisuals(item);
             string? v2Name = NormalizeRarity(item.groundItemRarityVisualsV2?.name);
             if (!string.IsNullOrEmpty(v2Name))
             {
                 return v2Name;
             }
 
-            string? legacyName = NormalizeRarity(item.groundItemRarityVisuals?.name);
+            string? legacyName = NormalizeRarity(GetVisualMember<string>(legacyVisuals, "name"));
             if (!string.IsNullOrEmpty(legacyName))
             {
                 return legacyName;
             }
 
-            Transform? rarityRoot = item.groundItemRarityVisualsV2?.transform ?? item.groundItemRarityVisuals?.transform;
+            Transform? rarityRoot = item.groundItemRarityVisualsV2?.transform
+                ?? GetVisualMember<Transform>(legacyVisuals, "transform");
             if (rarityRoot == null)
             {
                 return null;
@@ -169,6 +173,60 @@ namespace Mod.Cheats.ESP
                 {
                     return childRarity;
                 }
+            }
+
+            return null;
+        }
+
+        public static string? GetRarityVisualName(GroundItemVisuals item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            string? v2Name = item.groundItemRarityVisualsV2?.name;
+            if (!string.IsNullOrWhiteSpace(v2Name))
+            {
+                return v2Name;
+            }
+
+            return GetVisualMember<string>(GetLegacyRarityVisuals(item), "name");
+        }
+
+        private static object? GetLegacyRarityVisuals(GroundItemVisuals item)
+        {
+            return GetVisualMember<object>(item, "groundItemRarityVisuals");
+        }
+
+        private static T? GetVisualMember<T>(object? instance, string memberName) where T : class
+        {
+            if (instance == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+                for (Type? type = instance.GetType(); type != null; type = type.BaseType)
+                {
+                    PropertyInfo? property = type.GetProperty(memberName, flags);
+                    if (property != null)
+                    {
+                        return property.GetValue(instance) as T;
+                    }
+
+                    FieldInfo? field = type.GetField(memberName, flags);
+                    if (field != null)
+                    {
+                        return field.GetValue(instance) as T;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Keep version-compatibility reflection non-fatal.
             }
 
             return null;

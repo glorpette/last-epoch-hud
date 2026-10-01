@@ -27,4 +27,22 @@ namespace System.Runtime.CompilerServices
             NullableFlags = value;
         }
     }
+
+    /// <summary>
+    /// Supplies the nullable context metadata expected by the compiler when game-generated
+    /// Unity assemblies contain a stripped copy of this compiler attribute.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Interface | AttributeTargets.Module | AttributeTargets.Delegate, Inherited = false)]
+    public sealed class NullableContextAttribute : Attribute
+    {
+        /// <summary>Flags specifying the nullable context.</summary>
+        public readonly byte Flag;
+
+        /// <summary>Initializes the attribute.</summary>
+        /// <param name="value">The nullable context flag.</param>
+        public NullableContextAttribute(byte value)
+        {
+            Flag = value;
+        }
+    }
 }

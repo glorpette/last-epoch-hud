@@ -36,6 +36,9 @@
    <Reference Include="Il2CppLE.Telemetry.Client">  
     <HintPath>$(LEMelonLoaderPath)\Il2CppAssemblies\Il2CppLE.Telemetry.Client.dll</HintPath>  
    </Reference>
+   <Reference Include="Il2CppLE.Telemetry">
+    <HintPath>$(LEMelonLoaderPath)\Il2CppAssemblies\Il2CppLE.Telemetry.dll</HintPath>
+   </Reference>
    <Reference Include="Il2CppLidgren.Network">
     <HintPath>$(LEMelonLoaderPath)\Il2CppAssemblies\Il2CppLidgren.Network.dll</HintPath>
    </Reference>

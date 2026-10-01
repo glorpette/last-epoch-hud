@@ -211,7 +211,7 @@ namespace Mod.Cheats.ESP
 					continue;
 
 				string itemName = item.itemData?.FullName ?? item.name;
-				string rarity = item.groundItemRarityVisuals?.name ?? "Unknown";
+				string rarity = Items.GetRarityVisualName(item) ?? "Unknown";
 				string sceneName = GetSceneName(item.gameObject);
 				string label = $"[ITEM] {itemName} | R:{rarity} | P:{FormatVec3(itemPos)} | S:{sceneName}";
 

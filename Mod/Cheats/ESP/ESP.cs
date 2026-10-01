@@ -72,15 +72,22 @@ namespace Mod.Cheats.ESP
 
         public static void Draw()
         {
-            for (int i = 0; i < lineDrawings.Count; i++)
+            Drawing.BeginDrawingPass();
+            try
             {
-                lineDrawings[i].Draw();
-            }
+                for (int i = 0; i < lineDrawings.Count; i++)
+                {
+                    lineDrawings[i].Draw();
+                }
 
-            Drawing.BeginLabelPlacementPass();
-            for (int i = 0; i < stringDrawings.Count; i++)
+                for (int i = 0; i < stringDrawings.Count; i++)
+                {
+                    stringDrawings[i].Draw();
+                }
+            }
+            finally
             {
-                stringDrawings[i].Draw();
+                Drawing.EndDrawingPass();
             }
         }
 

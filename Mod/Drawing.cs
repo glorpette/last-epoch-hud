@@ -24,6 +24,48 @@ namespace Mod
 		private static readonly GUIContent s_contentA = new GUIContent();
 		private static readonly GUIContent s_contentB = new GUIContent();
 		private static readonly List<Rect> s_offScreenLabelRects = new List<Rect>(128);
+		private static readonly Dictionary<Vector3, Vector3> s_screenPointCache = new Dictionary<Vector3, Vector3>(512);
+		private static Camera? s_passCamera;
+		private static int s_passScreenWidth;
+		private static int s_passScreenHeight;
+		private static bool s_drawingPassActive;
+
+		public static void BeginDrawingPass()
+		{
+			s_passCamera = Camera.main;
+			s_passScreenWidth = Screen.width;
+			s_passScreenHeight = Screen.height;
+			s_screenPointCache.Clear();
+			s_drawingPassActive = true;
+			BeginLabelPlacementPass();
+		}
+
+		public static void EndDrawingPass()
+		{
+			s_drawingPassActive = false;
+			s_passCamera = null;
+			s_screenPointCache.Clear();
+		}
+
+		private static Camera? GetCamera()
+		{
+			return s_drawingPassActive ? s_passCamera : Camera.main;
+		}
+
+		private static int CurrentScreenWidth => s_drawingPassActive ? s_passScreenWidth : Screen.width;
+		private static int CurrentScreenHeight => s_drawingPassActive ? s_passScreenHeight : Screen.height;
+
+		private static Vector3 GetScreenPoint(Vector3 worldPosition, Camera camera)
+		{
+			if (s_drawingPassActive && s_screenPointCache.TryGetValue(worldPosition, out var cached))
+				return cached;
+
+			var screenPoint = camera.WorldToScreenPoint(worldPosition);
+			if (s_drawingPassActive && s_screenPointCache.Count < 2048)
+				s_screenPointCache[worldPosition] = screenPoint;
+
+			return screenPoint;
+		}
 
 		public static void BeginLabelPlacementPass()
 		{
@@ -38,16 +80,16 @@ namespace Mod
 			}
 
 			return new Vector2(
-							  Mathf.Clamp(vecIn.x, padding.x, Screen.width - padding.x),
-							  Mathf.Clamp(vecIn.y, padding.y, Screen.height - padding.y)
+				  Mathf.Clamp(vecIn.x, padding.x, CurrentScreenWidth - padding.x),
+				  Mathf.Clamp(vecIn.y, padding.y, CurrentScreenHeight - padding.y)
 							 );
 		}
 
 		// Ensures a rectangle defined by its upper-left corner and size stays within the screen bounds with padding
 		static Vector2 ClampRectToScreen(Vector2 upperLeft, Vector2 size, Vector2 padding)
 		{
-			float clampedX = Mathf.Clamp(upperLeft.x, padding.x, Screen.width - size.x - padding.x);
-			float clampedY = Mathf.Clamp(upperLeft.y, padding.y, Screen.height - size.y - padding.y);
+			float clampedX = Mathf.Clamp(upperLeft.x, padding.x, CurrentScreenWidth - size.x - padding.x);
+			float clampedY = Mathf.Clamp(upperLeft.y, padding.y, CurrentScreenHeight - size.y - padding.y);
 			return new Vector2(clampedX, clampedY);
 		}
 
@@ -56,15 +98,15 @@ namespace Mod
 			upperLeft = Vector2.zero;
 			size = Vector2.zero;
 
-			var cam = Camera.main;
+			var cam = GetCamera();
 			if (cam == null) return false;
 
-			Vector3 screen = cam.WorldToScreenPoint(worldPosition);
+			Vector3 screen = GetScreenPoint(worldPosition, cam);
 			bool isBehindCamera = screen.z < 0;
 			if (isBehindCamera) screen *= -1; // mirror behind-camera points like ClampToScreen
 			bool isOffScreen = isBehindCamera || IsOffScreen(screen);
 			bool preferVerticalStacking = ShouldStackVertically(screen);
-			screen.y = Screen.height - screen.y;
+			screen.y = CurrentScreenHeight - screen.y;
 
 			size = style.CalcSize(content);
 			Vector2 desiredUpperLeft = centered
@@ -82,20 +124,20 @@ namespace Mod
 		static bool IsOffScreen(Vector3 screen)
 		{
 			return screen.x < 0f
-				|| screen.x > Screen.width
+				|| screen.x > CurrentScreenWidth
 				|| screen.y < 0f
-				|| screen.y > Screen.height;
+				|| screen.y > CurrentScreenHeight;
 		}
 
 		static bool ShouldStackVertically(Vector3 screen)
 		{
 			float overflowX = 0f;
 			if (screen.x < 0f) overflowX = -screen.x;
-			else if (screen.x > Screen.width) overflowX = screen.x - Screen.width;
+			else if (screen.x > CurrentScreenWidth) overflowX = screen.x - CurrentScreenWidth;
 
 			float overflowY = 0f;
 			if (screen.y < 0f) overflowY = -screen.y;
-			else if (screen.y > Screen.height) overflowY = screen.y - Screen.height;
+			else if (screen.y > CurrentScreenHeight) overflowY = screen.y - CurrentScreenHeight;
 
 			return overflowX >= overflowY;
 		}
@@ -139,7 +181,7 @@ namespace Mod
 
 			if (preferVerticalStacking)
 			{
-				float maxY = Screen.height - size.y - LabelScreenPadding.y;
+				float maxY = CurrentScreenHeight - size.y - LabelScreenPadding.y;
 				for (float y = LabelScreenPadding.y; y <= maxY; y += step)
 				{
 					var candidate = new Vector2(preferredUpperLeft.x, y);
@@ -152,7 +194,7 @@ namespace Mod
 			}
 			else
 			{
-				float maxX = Screen.width - size.x - LabelScreenPadding.x;
+				float maxX = CurrentScreenWidth - size.x - LabelScreenPadding.x;
 				for (float x = LabelScreenPadding.x; x <= maxX; x += step)
 				{
 					var candidate = new Vector2(x, preferredUpperLeft.y);
@@ -289,11 +331,11 @@ namespace Mod
 			if (!Settings.showESPLabels)
 				return;
 
-			var cam = Camera.main;
+			var cam = GetCamera();
 			if (cam == null) return;
-			Vector3 screen = cam.WorldToScreenPoint(worldPosition);
+			Vector3 screen = GetScreenPoint(worldPosition, cam);
 			if (screen.z < 0) screen *= -1;
-			screen.y = Screen.height - screen.y;
+			screen.y = CurrentScreenHeight - screen.y;
 
 			string firstPart = label.Length > 3 ? label.Substring(0, 3) : label;
 			string secondPart = label.Length > 3 ? label.Substring(3) : string.Empty;
@@ -339,13 +381,13 @@ namespace Mod
 			Color prevColor = GUI.color;
 			Matrix4x4 prevMatrix = GUI.matrix;
 
-			var cam = Camera.main;
+			var cam = GetCamera();
 			if (cam == null) return;
-			Vector3 screenA = cam.WorldToScreenPoint(worldA);
-			Vector3 screenB = cam.WorldToScreenPoint(worldB);
+			Vector3 screenA = GetScreenPoint(worldA, cam);
+			Vector3 screenB = GetScreenPoint(worldB, cam);
 
-			screenA.y = Screen.height - screenA.y;
-			screenB.y = Screen.height - screenB.y;
+			screenA.y = CurrentScreenHeight - screenA.y;
+			screenB.y = CurrentScreenHeight - screenB.y;
 
 
 			// Clamp points to screen with padding
@@ -453,6 +495,7 @@ namespace Mod
 				UnityEngine.Object.Destroy(lineTex);
 				lineTex = null;
 			}
+			EndDrawingPass();
 			// Do not touch GUI.skin here; class can now be safely touched outside OnGUI
 		}
 	}

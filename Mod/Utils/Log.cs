@@ -48,6 +48,9 @@ internal static class Log
 
     private const int MaxBufferedGameEvents = 240;
     private const int MaxBufferedNetworkBreadcrumbs = 400;
+    private const int MaxThrottleStates = 2048;
+    private const int MaxNetworkBreadcrumbGates = 4096;
+    private const int MaxDumpGates = 256;
 
     private static readonly object s_lock = new();
     private static readonly Dictionary<string, ThrottleState> s_throttleStates = new(StringComparer.Ordinal);
@@ -68,6 +71,9 @@ internal static class Log
 
     public static void InfoThrottled(LogSource source, string key, string message, TimeSpan interval)
         => WriteThrottled(source, LogLevel.Info, key, message, interval);
+
+    public static void InfoThrottled(LogSource source, string key, Func<string> messageFactory, TimeSpan interval)
+        => WriteThrottled(source, LogLevel.Info, key, messageFactory, interval);
 
     public static void WarningThrottled(LogSource source, string key, string message, TimeSpan interval)
         => WriteThrottled(source, LogLevel.Warning, key, message, interval);
@@ -141,6 +147,8 @@ internal static class Log
             if (s_networkBreadcrumbGates.TryGetValue(gateKey, out var lastUtc) && now - lastUtc < minInterval)
                 return;
 
+            if (!s_networkBreadcrumbGates.ContainsKey(gateKey) && s_networkBreadcrumbGates.Count >= MaxNetworkBreadcrumbGates)
+                EvictOldestDateEntry(s_networkBreadcrumbGates);
             s_networkBreadcrumbGates[gateKey] = now;
             phase = s_currentGamePhase;
         }
@@ -165,6 +173,8 @@ internal static class Log
             if (s_networkBreadcrumbGates.TryGetValue(gateKey, out var lastUtc) && now - lastUtc < minInterval)
                 return;
 
+            if (!s_networkBreadcrumbGates.ContainsKey(gateKey) && s_networkBreadcrumbGates.Count >= MaxNetworkBreadcrumbGates)
+                EvictOldestDateEntry(s_networkBreadcrumbGates);
             s_networkBreadcrumbGates[gateKey] = now;
             phase = s_currentGamePhase;
         }
@@ -201,6 +211,8 @@ internal static class Log
                 return;
             }
 
+            if (!s_dumpGates.ContainsKey(key) && s_dumpGates.Count >= MaxDumpGates)
+                EvictOldestDateEntry(s_dumpGates);
             s_dumpGates[key] = now;
             snapshot = s_gameEvents.ToArray();
             phaseAtDump = s_currentGamePhase;
@@ -240,6 +252,8 @@ internal static class Log
             if (s_dumpGates.TryGetValue(key, out var lastDumpUtc) && now - lastDumpUtc < minInterval)
                 return;
 
+            if (!s_dumpGates.ContainsKey(key) && s_dumpGates.Count >= MaxDumpGates)
+                EvictOldestDateEntry(s_dumpGates);
             s_dumpGates[key] = now;
             snapshot = s_networkBreadcrumbs.ToArray();
             phaseAtDump = s_currentGamePhase;
@@ -674,25 +688,43 @@ internal static class Log
 
     private static void WriteThrottled(LogSource source, LogLevel level, string key, string message, TimeSpan interval)
     {
-        if (interval <= TimeSpan.Zero)
-        {
-            Write(source, level, message);
+        if (!TryPassThrottle(key, interval, out int suppressedCount))
             return;
-        }
+        if (suppressedCount > 0)
+            message = $"{message} (suppressed {suppressedCount} repeats)";
+        Write(source, level, message);
+    }
+
+    private static void WriteThrottled(LogSource source, LogLevel level, string key, Func<string> messageFactory, TimeSpan interval)
+    {
+        if (!TryPassThrottle(key, interval, out int suppressedCount))
+            return;
+
+        string message = messageFactory();
+        if (suppressedCount > 0)
+            message = $"{message} (suppressed {suppressedCount} repeats)";
+        Write(source, level, message);
+    }
+
+    private static bool TryPassThrottle(string key, TimeSpan interval, out int suppressedCount)
+    {
+        suppressedCount = 0;
+        if (interval <= TimeSpan.Zero)
+            return true;
 
         var now = DateTime.UtcNow;
-        int suppressedCount = 0;
-
         lock (s_lock)
         {
             if (!s_throttleStates.TryGetValue(key, out var state))
             {
+                if (s_throttleStates.Count >= MaxThrottleStates)
+                    EvictOldestThrottleEntry();
                 s_throttleStates[key] = new ThrottleState { LastLogUtc = now };
             }
             else if (now - state.LastLogUtc < interval)
             {
                 state.SuppressedCount++;
-                return;
+                return false;
             }
             else
             {
@@ -702,12 +734,39 @@ internal static class Log
             }
         }
 
-        if (suppressedCount > 0)
+        return true;
+    }
+
+    private static void EvictOldestThrottleEntry()
+    {
+        string? oldestKey = null;
+        DateTime oldestUtc = DateTime.MaxValue;
+        foreach (var entry in s_throttleStates)
         {
-            message = $"{message} (suppressed {suppressedCount} repeats)";
+            if (entry.Value.LastLogUtc >= oldestUtc)
+                continue;
+            oldestKey = entry.Key;
+            oldestUtc = entry.Value.LastLogUtc;
         }
 
-        Write(source, level, message);
+        if (oldestKey != null)
+            s_throttleStates.Remove(oldestKey);
+    }
+
+    private static void EvictOldestDateEntry(Dictionary<string, DateTime> entries)
+    {
+        string? oldestKey = null;
+        DateTime oldestUtc = DateTime.MaxValue;
+        foreach (var entry in entries)
+        {
+            if (entry.Value >= oldestUtc)
+                continue;
+            oldestKey = entry.Key;
+            oldestUtc = entry.Value;
+        }
+
+        if (oldestKey != null)
+            entries.Remove(oldestKey);
     }
 
     private static void Write(LogSource source, LogLevel level, string message)

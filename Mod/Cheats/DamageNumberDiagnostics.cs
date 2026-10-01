@@ -21,7 +21,10 @@ namespace Mod.Cheats
 		}
 
 		private static readonly Dictionary<int, DamageNumberState> s_states = new Dictionary<int, DamageNumberState>(512);
+		private static readonly List<int> s_staleStateIds = new List<int>(128);
 		private static readonly StringBuilder s_summaryBuilder = new StringBuilder(512);
+		private const float StaleStateLifetimeSeconds = 30f;
+		private const float StatePruneIntervalSeconds = 5f;
 
 		private static Type? s_cachedDamageNumberType;
 		private static FieldInfo? s_tmpField;
@@ -32,6 +35,7 @@ namespace Mod.Cheats
 		private static bool s_loggedTextBinding;
 
 		private static float s_periodStartAt = -1f;
+		private static float s_nextStatePruneAt;
 		private static int s_periodAwakeCount;
 		private static int s_periodInitCount;
 		private static int s_periodSendCount;
@@ -69,6 +73,7 @@ namespace Mod.Cheats
 			try
 			{
 				float now = Time.unscaledTime;
+				MaybePruneStates(now);
 				if (s_periodStartAt <= 0f)
 					s_periodStartAt = now;
 
@@ -86,7 +91,7 @@ namespace Mod.Cheats
 				Log.InfoThrottled(
 					LogSource.Hooks,
 					$"DamageNumber.Init.{overloadKey}",
-					$"[DamageNumberDiag] Init observed ({overloadKey}) (offline={ObjectManager.IsOfflineMode()}, id={id}, text='{SafeStateText(state)}').",
+					() => $"[DamageNumberDiag] Init observed ({overloadKey}) (offline={ObjectManager.IsOfflineMode()}, id={id}, text='{SafeStateText(state)}').",
 					TimeSpan.FromSeconds(2));
 
 				MaybeEmitPeriodSummary(now, "Postfix", "Init");
@@ -100,6 +105,7 @@ namespace Mod.Cheats
 		private static void Observe(object __instance, MethodBase __originalMethod, string phase)
 		{
 			float now = Time.unscaledTime;
+			MaybePruneStates(now);
 			if (s_periodStartAt <= 0f)
 				s_periodStartAt = now;
 
@@ -142,7 +148,7 @@ namespace Mod.Cheats
 						Log.InfoThrottled(
 							LogSource.Hooks,
 							"DamageNumber.SendPropertiesToRenderer",
-							$"[DamageNumberDiag] SendPropertiesToRenderer observed (offline={ObjectManager.IsOfflineMode()}, id={id}, text='{SafeStateText(state)}', color={SafeStateColor(state)}).",
+							() => $"[DamageNumberDiag] SendPropertiesToRenderer observed (offline={ObjectManager.IsOfflineMode()}, id={id}, text='{SafeStateText(state)}', color={SafeStateColor(state)}).",
 							SendLogInterval);
 					}
 					break;
@@ -169,6 +175,35 @@ namespace Mod.Cheats
 			}
 
 			return state;
+		}
+
+		public static void OnSceneChanged()
+		{
+			s_states.Clear();
+			s_staleStateIds.Clear();
+			s_periodStartAt = -1f;
+			s_nextStatePruneAt = 0f;
+			s_periodAwakeCount = 0;
+			s_periodInitCount = 0;
+			s_periodSendCount = 0;
+			s_periodDestroyCount = 0;
+		}
+
+		private static void MaybePruneStates(float now)
+		{
+			if (now < s_nextStatePruneAt || s_states.Count == 0)
+				return;
+
+			s_nextStatePruneAt = now + StatePruneIntervalSeconds;
+			s_staleStateIds.Clear();
+			foreach (var entry in s_states)
+			{
+				if (now - entry.Value.LastSeenAt > StaleStateLifetimeSeconds)
+					s_staleStateIds.Add(entry.Key);
+			}
+
+			for (int i = 0; i < s_staleStateIds.Count; i++)
+				s_states.Remove(s_staleStateIds[i]);
 		}
 
 		private static void CaptureRendererData(DamageNumberState state, object instance)
@@ -471,7 +506,7 @@ namespace Mod.Cheats
 					Log.InfoThrottled(
 						LogSource.Hooks,
 						$"DamageNumberDiag.TextHierarchy.{compTypeName}",
-						$"[DamageNumberDiag] Hierarchy text binding resolved via {compTypeName}.text",
+						() => $"[DamageNumberDiag] Hierarchy text binding resolved via {compTypeName}.text",
 						TimeSpan.FromSeconds(30));
 					return true;
 				}

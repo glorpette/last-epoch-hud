@@ -26,6 +26,7 @@ namespace Mod;
 	public class Mod : MelonMod
 	{
 		private static bool isOnGUI = false;
+		private static bool s_timeScaleWasApplied;
 		private const string HarmonyId = "LEHud.Patches";
 		private static HarmonyLib.Harmony? s_harmony;
 
@@ -86,6 +87,10 @@ namespace Mod;
 				Shrines.OnSceneChanged();
 				RunePrisons.OnSceneChanged();
 				Chests.OnSceneChanged();
+				Items.OnSceneChanged();
+				SpecialEntityEspHelper.OnSceneChanged();
+				MinimapEnemyCircles.OnSceneChanged();
+				DamageNumberDiagnostics.OnSceneChanged();
 			}
 			catch (System.Exception e)
 			{
@@ -100,37 +105,77 @@ namespace Mod;
 
 		public override void OnUpdate() // Runs once per frame.
 		{
+			bool hasPlayer;
 			try
 			{
-				bool hasPlayer = ObjectManager.HasPlayer();
-				if (hasPlayer)
-				{
-					MapHack.OnUpdate(hasPlayer: true);
-					ESP.OnUpdate();
-					AutoPotion.OnUpdate();
-					MinimapEnemyCircles.Update();
-					AutoDisconnect.OnUpdate();
-				}
-				else
-				{
-					MapHack.OnUpdate(hasPlayer: false);
-					// Keep overlays clean when no world/player context is available.
-					ESP.Clear();
-					MinimapEnemyCircles.ClearCircles();
-				}
-
-				Menu.OnUpdate();
-				DpsMeter.OnUpdate();
-				AntiIdleSystem.OnUpdate(); // Add anti-idle system
-				if (Settings.timeScale != 1.0f)
-					UnityEngine.Time.timeScale = Settings.timeScale;
+				hasPlayer = ObjectManager.HasPlayer();
 			}
 			catch (Exception e)
 			{
-				MelonLogger.Error(e.ToString());
+				hasPlayer = false;
+				Log.ErrorThrottled(LogSource.LEHud, "update:player-check", $"Player-state check failed: {e}", TimeSpan.FromSeconds(5));
+			}
+			if (hasPlayer)
+			{
+				RunUpdateSafely("MapHack", hasPlayer, MapHack.OnUpdate);
+				RunUpdateSafely("ESP", ESP.OnUpdate);
+				RunUpdateSafely("AutoPotion", AutoPotion.OnUpdate);
+				RunUpdateSafely("MinimapEnemyCircles", MinimapEnemyCircles.Update);
+				RunUpdateSafely("AutoDisconnect", AutoDisconnect.OnUpdate);
+			}
+			else
+			{
+				RunUpdateSafely("MapHack", hasPlayer, MapHack.OnUpdate);
+				// Keep overlays clean when no world/player context is available.
+				RunUpdateSafely("ESP.Clear", ESP.Clear);
+				RunUpdateSafely("MinimapEnemyCircles.Clear", MinimapEnemyCircles.ClearCircles);
 			}
 
-			//MelonLogger.Msg("OnUpdate");
+			RunUpdateSafely("Menu", Menu.OnUpdate);
+			RunUpdateSafely("DpsMeter", DpsMeter.OnUpdate);
+			RunUpdateSafely("AntiIdleSystem", AntiIdleSystem.OnUpdate);
+
+			try
+			{
+				if (Settings.timeScale != 1.0f)
+				{
+					UnityEngine.Time.timeScale = Settings.timeScale;
+					s_timeScaleWasApplied = true;
+				}
+				else if (s_timeScaleWasApplied)
+				{
+					UnityEngine.Time.timeScale = 1.0f;
+					s_timeScaleWasApplied = false;
+				}
+			}
+			catch (Exception e)
+			{
+				Log.ErrorThrottled(LogSource.LEHud, "timescale-update", $"Time-scale update failed: {e.Message}", TimeSpan.FromSeconds(5));
+			}
+		}
+
+		private static void RunUpdateSafely(string feature, Action update)
+		{
+			try
+			{
+				update();
+			}
+			catch (Exception e)
+			{
+				Log.ErrorThrottled(LogSource.LEHud, $"update:{feature}", $"{feature} update failed: {e}", TimeSpan.FromSeconds(5));
+			}
+		}
+
+		private static void RunUpdateSafely<T>(string feature, T context, Action<T> update)
+		{
+			try
+			{
+				update(context);
+			}
+			catch (Exception e)
+			{
+				Log.ErrorThrottled(LogSource.LEHud, $"update:{feature}", $"{feature} update failed: {e}", TimeSpan.FromSeconds(5));
+			}
 		}
 
 		public override void OnFixedUpdate() // Can run multiple times per frame. Mostly used for Physics.
@@ -169,7 +214,13 @@ namespace Mod;
 		public override void OnApplicationQuit() // Runs when the Game is told to Close.
 		{
 			//MelonLogger.Msg("OnApplicationQuit");
+			if (s_timeScaleWasApplied)
+			{
+				UnityEngine.Time.timeScale = 1.0f;
+				s_timeScaleWasApplied = false;
+			}
 			SpriteManager.Cleanup();
+			MinimapEnemyCircles.Cleanup();
 			Drawing.Cleanup();
 			try
 			{

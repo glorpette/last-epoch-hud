@@ -17,7 +17,7 @@ namespace Mod.Cheats.ESP
 		//        SummonedCorpse: Necromancer summons
 
 
-		private static string GetActorName(ActorVisuals actor)
+		private static string GetActorName(ActorVisuals actor, ActorDisplayInformation? displayInformation)
 		{
 			if (actor.isPlayer && actor.UserIdentity != null)
 			{
@@ -25,8 +25,6 @@ namespace Mod.Cheats.ESP
 			}
 			else
 			{
-				var displayInformation = actor.gameObject.GetComponent<ActorDisplayInformation>();
-
 				if (displayInformation != null)
 				{
 					// Prefer the localized name when available; fall back to displayName
@@ -55,9 +53,8 @@ namespace Mod.Cheats.ESP
 			return EspUtils.SanitizeLabel(actor.name);
 		}
 
-		private static Color GetRarityColor(ActorVisuals actor, string alignmentName)
+		private static Color GetRarityColor(ActorDisplayInformation? info, string alignmentName)
 		{
-			var info = actor.GetComponent<ActorDisplayInformation>();
 			if (info != null)
 			{
 				if (info.actorClass == DisplayActorClass.Boss) return Color.red;
@@ -73,51 +70,45 @@ namespace Mod.Cheats.ESP
 		public static void GatherActors(GameObject localPlayer)
 		{
 			if (ActorManager.instance == null) return;
+			var playerTransform = localPlayer.transform;
+			var playerPosition = playerTransform.position;
+			float maxDistance = Settings.drawDistance;
+			float maxDistanceSquared = maxDistance * maxDistance;
 
 			foreach (var visual in ActorManager.instance.visuals)
 			{
 				string alignmentName = visual.alignment?.name ?? string.Empty;
 				foreach (var actor in visual.visuals._list)
 				{
-					if (!actor.gameObject.activeInHierarchy) continue;
+					if (actor == null || actor.gameObject == null || !actor.gameObject.activeInHierarchy) continue;
+					var actorTransform = actor.transform;
 
 					// Skip the local player's own actor visuals
-					if (actor.transform.IsChildOf(localPlayer.transform)) continue;
+					if (actorTransform.IsChildOf(playerTransform)) continue;
+
+					// Cull distant/dead actors before doing the more expensive special-entity
+					// component and hierarchy checks.
+					var position = actorTransform.position;
+					var delta = position - playerPosition;
+					if (actor.dead || delta.sqrMagnitude >= maxDistanceSquared) continue;
+
+					var actorDisplayInfo = actor.GetComponent<ActorDisplayInformation>();
+					bool passesActorFilters = alignmentName.Length > 0
+						&& alignmentName != "Barrel"
+						&& Settings.ShouldDrawNPCAlignment(alignmentName)
+						&& (actorDisplayInfo == null || Settings.ShouldDrawNPCClassification(actorDisplayInfo.actorClass));
 
 					// Detect special entities (loot lizards, champions, etc.)
-					var special = SpecialEntityEspHelper.DetectType(actor);
+					var special = SpecialEntityEspHelper.DetectType(actor, actorDisplayInfo);
 					bool bypassActorFilters = special is SpecialEntityType.LootLizard or SpecialEntityType.Omen;
 					bool isAnySpecial = SpecialEntityEspHelper.IsSpecial(special);
 
 					// Some special entities are atypical and should bypass normal actor filters.
-					if (!bypassActorFilters)
-					{
-						// Dedicated barrel pass reads ActorList.actors to support props that
-						// do not surface as ActorVisuals in some builds/scenes.
-						if (alignmentName == "Barrel") continue;
+					if (!bypassActorFilters && !passesActorFilters) continue;
 
-						if (alignmentName.Length == 0 || !Settings.ShouldDrawNPCAlignment(alignmentName)) continue;
-
-						var actorDisplayInfo = actor.GetComponent<ActorDisplayInformation>();
-						if (actorDisplayInfo != null)
-						{
-							// in 1.2 in offline mode, we could find the lizards reliably by the LootLizardFleeing component
-							// TODO: verify if this is still the case in 1.3
-							if (!Settings.ShouldDrawNPCClassification(actorDisplayInfo.actorClass))
-							{
-								continue;
-							}
-						}
-					}
-
-					float distance = Vector3.Distance(
-						actor.transform.position, localPlayer.transform.position);
-
-					if (distance >= Settings.drawDistance || actor.dead) continue;
-
-					var name = GetActorName(actor);
-					var position = actor.transform.position;
-					position.y += 1.5f;
+					var name = GetActorName(actor, actorDisplayInfo);
+					var labelPosition = position;
+					labelPosition.y += 1.5f;
 
 					// Per-special gating
 					if (isAnySpecial && !SpecialEntityEspHelper.ShouldRender(special))
@@ -127,11 +118,11 @@ namespace Mod.Cheats.ESP
 
 					name = SpecialEntityEspHelper.BuildLabel(special, name);
 					var textStyle = SpecialEntityEspHelper.ResolveTextStyle(special);
-					var color = SpecialEntityEspHelper.ResolveColor(special, GetRarityColor(actor, alignmentName));
+					var color = SpecialEntityEspHelper.ResolveColor(special, GetRarityColor(actorDisplayInfo, alignmentName));
 
-					if (Settings.showESPLines) ESP.AddLine(localPlayer.transform.position, actor.transform.position, color);
+					if (Settings.showESPLines) ESP.AddLine(playerPosition, position, color);
 					//ESP.AddString(name + " (" + distance.ToString("F1") + ")  ", position, color);
-					if (Settings.showESPLabels) ESP.AddString(name, position, color, textStyle);
+					if (Settings.showESPLabels) ESP.AddString(name, labelPosition, color, textStyle);
 				}
 			}
 		}

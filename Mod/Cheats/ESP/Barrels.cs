@@ -24,6 +24,14 @@ namespace Mod.Cheats.ESP
 		private static MemberInfo? s_actorsMember;
 		private static MemberInfo? s_dlistBackingListMember;
 		private static MethodInfo? s_getAlignmentMethod;
+		private sealed class CollectionAccessors
+		{
+			public MemberInfo? BackingMember;
+			public MemberInfo? CountMember;
+			public PropertyInfo? ItemProperty;
+		}
+
+		private static readonly Dictionary<Type, CollectionAccessors> s_collectionAccessors = new();
 
 		private static readonly string[] ActorBucketsMemberNames =
 		{
@@ -44,6 +52,7 @@ namespace Mod.Cheats.ESP
 
 			var localPos = player.transform.position;
 			float maxDistance = Settings.drawDistance;
+			float maxDistanceSquared = maxDistance * maxDistance;
 
 			if (!EnsureReflectionBindings()) return;
 			if (ActorManager.instance == null) return;
@@ -66,7 +75,7 @@ namespace Mod.Cheats.ESP
 					if (!IsBarrel(actor)) continue;
 
 					var actorPos = actor.transform.position;
-					if (Vector3.Distance(localPos, actorPos) > maxDistance) continue;
+					if ((actorPos - localPos).sqrMagnitude > maxDistanceSquared) continue;
 
 					var labelPos = actorPos;
 					labelPos.y += 1.1f;
@@ -81,6 +90,7 @@ namespace Mod.Cheats.ESP
 		{
 			if (s_reflectionInitAttempted) return s_reflectionReady;
 			s_reflectionInitAttempted = true;
+			s_collectionAccessors.Clear();
 
 			try
 			{
@@ -221,7 +231,8 @@ namespace Mod.Cheats.ESP
 			}
 
 			var sourceType = source.GetType();
-			var backingMember = FindMember(sourceType, DListBackingNames);
+			var accessors = GetCollectionAccessors(sourceType);
+			var backingMember = accessors.BackingMember;
 			if (backingMember != null)
 			{
 				var backingValue = GetMemberValue(backingMember, source);
@@ -236,8 +247,8 @@ namespace Mod.Cheats.ESP
 			}
 
 			// Fallback for IL2CPP containers that expose Count/Length + indexer but not IEnumerable.
-			var countMember = FindMember(sourceType, new[] { "Count", "count", "Length", "length" });
-			var itemProperty = sourceType.GetProperty("Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+			var countMember = accessors.CountMember;
+			var itemProperty = accessors.ItemProperty;
 			if (countMember != null && itemProperty != null)
 			{
 				var countObj = GetMemberValue(countMember, source);
@@ -259,6 +270,21 @@ namespace Mod.Cheats.ESP
 					}
 				}
 			}
+		}
+
+		private static CollectionAccessors GetCollectionAccessors(Type type)
+		{
+			if (s_collectionAccessors.TryGetValue(type, out var accessors))
+				return accessors;
+
+			accessors = new CollectionAccessors
+			{
+				BackingMember = FindMember(type, DListBackingNames),
+				CountMember = FindMember(type, new[] { "Count", "count", "Length", "length" }),
+				ItemProperty = type.GetProperty("Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+			};
+			s_collectionAccessors[type] = accessors;
+			return accessors;
 		}
 
 		private static Type? ResolveCollectionElementType(Type collectionType)

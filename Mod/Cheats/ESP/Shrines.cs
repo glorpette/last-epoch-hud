@@ -11,7 +11,10 @@ namespace Mod.Cheats.ESP
 		private static GameObject? s_shrineManager;
 		private static readonly List<Transform> s_shrineTransforms = new List<Transform>(16);
 		private static readonly List<string> s_shrineNames = new List<string>(16);
+		private static readonly List<Transform> s_scanTransforms = new List<Transform>(16);
 		private static readonly Color ShrineColor = Drawing.BloodOrange;
+		private const int ManagerSearchIntervalFrames = 180;
+		private static int s_nextManagerSearchFrame;
 
 
 		public static void OnSceneChanged()
@@ -20,6 +23,8 @@ namespace Mod.Cheats.ESP
 			s_shrineManager = null;
 			s_shrineTransforms.Clear();
 			s_shrineNames.Clear();
+			s_scanTransforms.Clear();
+			s_nextManagerSearchFrame = 0;
 		}
 
 		private static readonly string[] ManagerNameCandidates =
@@ -33,6 +38,8 @@ namespace Mod.Cheats.ESP
 		private static void TryFindManager()
 		{
 			if (s_shrineManager != null) return;
+			if (Time.frameCount < s_nextManagerSearchFrame) return;
+			s_nextManagerSearchFrame = Time.frameCount + ManagerSearchIntervalFrames;
 
 			for (int i = 0; i < ManagerNameCandidates.Length; i++)
 			{
@@ -108,39 +115,41 @@ namespace Mod.Cheats.ESP
 			TryFindManager();
 			if (s_shrineManager == null) return;
 
-			// If we already cached children and counts match, keep cache
 			var t = s_shrineManager.transform;
 			if (t == null) return;
 
-			// Simple validation: if cached count != current active shrine children, rebuild
-			int currentActiveShrines = 0;
+			// Collect valid transforms once. Comparing identity as well as count avoids
+			// keeping stale references when a shrine is replaced by another one.
+			s_scanTransforms.Clear();
 			for (int i = 0; i < t.childCount; i++)
 			{
 				var child = t.GetChild(i);
 				if (child != null && child.gameObject != null && child.gameObject.activeInHierarchy && LooksLikeShrine(child.gameObject) && IsShrineInteractable(child.gameObject))
 				{
-					currentActiveShrines++;
+					s_scanTransforms.Add(child);
 				}
 			}
 
-			if (currentActiveShrines == s_shrineTransforms.Count && currentActiveShrines > 0)
+			bool cacheMatches = s_scanTransforms.Count == s_shrineTransforms.Count;
+			if (cacheMatches)
 			{
-				return; // Cache still valid enough
+				for (int i = 0; i < s_scanTransforms.Count; i++)
+				{
+					if (s_scanTransforms[i] != s_shrineTransforms[i])
+					{
+						cacheMatches = false;
+						break;
+					}
+				}
 			}
+			if (cacheMatches) return;
 
-			// Rebuild cache
 			s_shrineTransforms.Clear();
 			s_shrineNames.Clear();
-
-			for (int i = 0; i < t.childCount; i++)
+			for (int i = 0; i < s_scanTransforms.Count; i++)
 			{
-				var child = t.GetChild(i);
-				if (child == null) continue;
+				var child = s_scanTransforms[i];
 				var go = child.gameObject;
-				if (go == null || !go.activeInHierarchy) continue;
-				if (!LooksLikeShrine(go)) continue;
-				if (!IsShrineInteractable(go)) continue; // skip consumed/disabled shrines
-
 				s_shrineTransforms.Add(child);
 				s_shrineNames.Add(GetDisplayName(go));
 			}
@@ -162,7 +171,6 @@ namespace Mod.Cheats.ESP
 				if (tr == null) continue;
 				var go = tr.gameObject;
 				if (go == null || !go.activeInHierarchy) continue;
-				if (!IsShrineInteractable(go)) continue;
 
 				var pos = tr.position;
 				var delta = pos - playerPos;
@@ -176,4 +184,4 @@ namespace Mod.Cheats.ESP
 			}
 		}
 	}
-} 
+}

@@ -79,6 +79,7 @@ namespace Mod.Cheats
             // Always update debug info, even if feature is disabled
             if (!Settings.showMinimapEnemyCircles) 
             {
+                ClearCircles();
                 if (shouldUpdateDebug) lastDebugInfo = "Feature DISABLED in settings";
                 return;
             }
@@ -267,6 +268,23 @@ namespace Mod.Cheats
                 if (updateDebug) lastDebugInfo = $"Initialize error: {e.Message}";
                 return false;
             }
+        }
+
+        public static void OnSceneChanged()
+        {
+            DestroyAllCircles();
+            minimapCanvas = null;
+            iconsContainer = null;
+            mapContainer = null;
+            minimapMap = null;
+            fullscreenMap = null;
+            smallMinimapBg = null;
+            isInitialized = false;
+            isMinimapOpen = false;
+            wasTabPressed = false;
+            nextInitializeAttemptAt = 0f;
+            initializeRetryDelaySeconds = InitialInitializeRetrySeconds;
+            debugUpdateCounter = 0;
         }
         
         private static void EnsureSpriteCache()
@@ -705,6 +723,35 @@ namespace Mod.Cheats
         {
             SetActiveCircleCount(0);
             lastCircleCount = 0;
+        }
+
+        public static void Cleanup()
+        {
+            DestroyAllCircles();
+            DestroySpriteAndTexture(spriteWhite);
+            DestroySpriteAndTexture(spriteYellow);
+            DestroySpriteAndTexture(spriteBlue);
+            DestroySpriteAndTexture(spriteRed);
+            spriteWhite = null;
+            spriteYellow = null;
+            spriteBlue = null;
+            spriteRed = null;
+            minimapCanvas = null;
+            iconsContainer = null;
+            mapContainer = null;
+            minimapMap = null;
+            fullscreenMap = null;
+            smallMinimapBg = null;
+            isInitialized = false;
+        }
+
+        private static void DestroySpriteAndTexture(Sprite? sprite)
+        {
+            if (sprite == null) return;
+            Texture2D? texture = sprite.texture;
+            UnityEngine.Object.Destroy(sprite);
+            if (texture != null)
+                UnityEngine.Object.Destroy(texture);
         }
     }
 }

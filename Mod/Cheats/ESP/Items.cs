@@ -8,6 +8,22 @@ namespace Mod.Cheats.ESP
 {
     internal class Items
     {
+        private const int ItemInfoRefreshIntervalFrames = 300;
+        private const int ItemInfoPruneIntervalFrames = 300;
+        private const int MaxCachedItemInfos = 4096;
+
+        private sealed class ItemDisplayInfo
+        {
+            public string? Rarity;
+            public string Name = string.Empty;
+            public int ResolvedAtFrame;
+            public int LastSeenFrame;
+        }
+
+        private static readonly Dictionary<int, ItemDisplayInfo> s_itemInfoByInstanceId = new();
+        private static readonly List<int> s_itemInfoPruneBuffer = new();
+        private static int s_nextItemInfoPruneFrame;
+
         private static readonly string[] s_supportedRarities =
         {
             "Magic",
@@ -25,6 +41,12 @@ namespace Mod.Cheats.ESP
 
             var playerPos = player.transform.position;
             float maxDistSq = Settings.drawDistance * Settings.drawDistance;
+            int frame = Time.frameCount;
+            if (frame >= s_nextItemInfoPruneFrame)
+            {
+                PruneItemInfoCache(frame);
+                s_nextItemInfoPruneFrame = frame + ItemInfoPruneIntervalFrames;
+            }
 
             foreach (var item in GroundItemVisuals.all._list)
             {
@@ -40,7 +62,8 @@ namespace Mod.Cheats.ESP
                     if (filter == Rule.RuleOutcome.HIDE) continue;
                 }
 
-                var rarity = ResolveItemRarity(item);
+                var itemInfo = GetItemDisplayInfo(item, frame);
+                var rarity = itemInfo.Rarity;
 
                 if (string.IsNullOrEmpty(rarity) || !Settings.ShouldDrawItemRarity(rarity))
                 {
@@ -50,11 +73,58 @@ namespace Mod.Cheats.ESP
                 var color = Drawing.ItemRarityToColor(rarity);
 
                 ESP.AddLine(playerPos, itemPos, color);
-                ESP.AddString(item.itemData.FullName, itemPos, color);
+                ESP.AddString(itemInfo.Name, itemPos, color);
             }
         }
 
-        // Unused import cleanup: ObjectManager no longer called directly
+        public static void OnSceneChanged()
+        {
+            s_itemInfoByInstanceId.Clear();
+            s_itemInfoPruneBuffer.Clear();
+            s_nextItemInfoPruneFrame = 0;
+        }
+
+        private static ItemDisplayInfo GetItemDisplayInfo(GroundItemVisuals item, int frame)
+        {
+            int instanceId = item.GetInstanceID();
+            if (!s_itemInfoByInstanceId.TryGetValue(instanceId, out var info)
+                || frame - info.ResolvedAtFrame >= ItemInfoRefreshIntervalFrames)
+            {
+                info = new ItemDisplayInfo
+                {
+                    Rarity = ResolveItemRarity(item),
+                    Name = item.itemData?.FullName ?? item.name,
+                    ResolvedAtFrame = frame,
+                    LastSeenFrame = frame
+                };
+
+                if (s_itemInfoByInstanceId.Count >= MaxCachedItemInfos)
+                    s_itemInfoByInstanceId.Clear();
+                s_itemInfoByInstanceId[instanceId] = info;
+            }
+            else
+            {
+                info.LastSeenFrame = frame;
+            }
+
+            return info;
+        }
+
+        private static void PruneItemInfoCache(int frame)
+        {
+            if (s_itemInfoByInstanceId.Count == 0)
+                return;
+
+            s_itemInfoPruneBuffer.Clear();
+            foreach (var entry in s_itemInfoByInstanceId)
+            {
+                if (frame - entry.Value.LastSeenFrame >= ItemInfoPruneIntervalFrames)
+                    s_itemInfoPruneBuffer.Add(entry.Key);
+            }
+
+            for (int i = 0; i < s_itemInfoPruneBuffer.Count; i++)
+                s_itemInfoByInstanceId.Remove(s_itemInfoPruneBuffer[i]);
+        }
 
         private static string? ResolveItemRarity(GroundItemVisuals item)
         {

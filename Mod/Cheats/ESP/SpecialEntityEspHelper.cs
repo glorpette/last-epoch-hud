@@ -23,7 +23,7 @@ namespace Mod.Cheats.ESP
 		private const string LootLizardFlairPrefix = "<<< ";
 		private const string LootLizardFlairSuffix = " >>>";
 		private const int OmenCacheSoftLimit = 4096;
-		private static readonly Dictionary<int, bool> s_omenStateByRootId = new(capacity: 128);
+		private static readonly HashSet<int> s_omenRootIds = new(capacity: 128);
 		private static readonly PropertyInfo? s_actorSyncActorDataProperty = typeof(ActorSync).GetProperty("actorData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 		private static readonly FieldInfo? s_actorSyncActorDataField = typeof(ActorSync).GetField("actorData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 		private static readonly PropertyInfo? s_actorDataIsOmenProperty = typeof(ActorData).GetProperty("isOmen", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -31,7 +31,12 @@ namespace Mod.Cheats.ESP
 
 		internal static bool IsSpecial(SpecialEntityType specialType) => specialType != SpecialEntityType.None;
 
-		internal static SpecialEntityType DetectType(ActorVisuals actor)
+		internal static void OnSceneChanged()
+		{
+			s_omenRootIds.Clear();
+		}
+
+		internal static SpecialEntityType DetectType(ActorVisuals actor, ActorDisplayInformation? displayInformation)
 		{
 			if (IsLootLizard(actor))
 			{
@@ -43,7 +48,7 @@ namespace Mod.Cheats.ESP
 				return SpecialEntityType.Omen;
 			}
 
-			if (IsChampion(actor))
+			if (IsChampion(displayInformation))
 			{
 				return SpecialEntityType.Champion;
 			}
@@ -120,9 +125,8 @@ namespace Mod.Cheats.ESP
 			return false;
 		}
 
-		private static bool IsChampion(ActorVisuals actor)
+		private static bool IsChampion(ActorDisplayInformation? info)
 		{
-			var info = actor.GetComponent<ActorDisplayInformation>();
 			if (info == null)
 			{
 				return false;
@@ -143,19 +147,26 @@ namespace Mod.Cheats.ESP
 			var rootTransform = actor.transform != null ? actor.transform.root : null;
 			var rootGameObject = rootTransform != null ? rootTransform.gameObject : actor.gameObject;
 			int cacheKey = rootGameObject.GetInstanceID();
-			if (s_omenStateByRootId.TryGetValue(cacheKey, out var cachedResult))
+			if (s_omenRootIds.Contains(cacheKey))
 			{
-				return cachedResult;
+				return true;
 			}
 
 			var isOmen = ComputeIsOmen(actor, rootGameObject);
-			if (s_omenStateByRootId.Count >= OmenCacheSoftLimit)
+			if (!isOmen)
 			{
-				s_omenStateByRootId.Clear();
+				// A false result can become true after delayed game initialization, so
+				// only cache confirmed Omens for the lifetime of the current scene.
+				return false;
 			}
 
-			s_omenStateByRootId[cacheKey] = isOmen;
-			return isOmen;
+			if (s_omenRootIds.Count >= OmenCacheSoftLimit)
+			{
+				s_omenRootIds.Clear();
+			}
+
+			s_omenRootIds.Add(cacheKey);
+			return true;
 		}
 
 		private static bool ComputeIsOmen(ActorVisuals actor, GameObject rootGameObject)

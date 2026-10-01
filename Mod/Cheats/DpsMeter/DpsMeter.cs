@@ -129,21 +129,7 @@ namespace Mod.Cheats
 			if (!hasDamage)
 				return;
 
-			float now = Time.unscaledTime;
-			if (s_totalHits == 0)
-				s_firstHitAt = now;
-
-			s_lastHitAt = now;
-			s_totalHits++;
-			s_totalDamage += damage;
-			s_peakHit = Mathf.Max(s_peakHit, damage);
-			s_minHit = Mathf.Min(s_minHit, damage);
-
-			s_recentHits.Enqueue(new HitSample(now, damage));
-			s_recentDamage += damage;
-
-			PruneWindow(now);
-			RefreshDps();
+			RegisterHit(damage, Time.unscaledTime);
 		}
 
 		public static void OnOnlineDamageTextSample(object source, string? text, Color? textColor, Vector3? worldPosition = null)
@@ -171,27 +157,10 @@ namespace Mod.Cheats
 
 		public static void OnUpdate()
 		{
-			if (!Settings.enableDpsMeter)
-			{
-				MaybeLogOnlineColorSummary("disabled");
-				ResetInternal();
-				s_sourceMode = DpsSourceMode.None;
-				return;
-			}
-
-			// Treat player-loss as a session boundary: clear all stats, including peaks.
-			if (!ObjectManager.HasPlayer())
-			{
-				MaybeLogOnlineColorSummary("player-lost");
-				ResetInternal();
-				s_sourceMode = DpsSourceMode.None;
-				return;
-			}
-
 			var currentMode = GetCurrentMode();
 			if (currentMode != s_sourceMode)
 			{
-				MaybeLogOnlineColorSummary("mode-changed");
+				MaybeLogOnlineColorSummary(currentMode == DpsSourceMode.None ? "disabled-or-player-lost" : "mode-changed");
 				ResetInternal();
 				s_sourceMode = currentMode;
 			}
@@ -550,6 +519,9 @@ namespace Mod.Cheats
 
 		private static DpsSourceMode GetCurrentMode()
 		{
+			if (!Settings.enableDpsMeter)
+				return DpsSourceMode.None;
+
 			if (!ObjectManager.HasPlayer())
 				return DpsSourceMode.None;
 
